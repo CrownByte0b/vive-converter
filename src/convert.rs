@@ -381,7 +381,7 @@ impl Converter {
     }
 
     fn convert_rich_text(
-        &self,
+        &mut self,
         text: &RichText,
         element: &OutlineElement,
         level: usize,
@@ -392,7 +392,7 @@ impl Converter {
             parts.push(String::new());
         }
         let styles = text.text_run_formatting();
-        let hyperlinks = text.hyperlinks();
+        let hyperlinks = self.text_links(text, &parts);
         let mut runs = Vec::new();
         let mut utf16_start = 0u32;
         let mut math_index = 0usize;
@@ -431,11 +431,11 @@ impl Converter {
             let utf16_end = utf16_start + part.encode_utf16().count() as u32;
             if !style.hidden() {
                 let mut marks = style_marks(style, text.paragraph_style());
-                if let Some(link) = hyperlinks
+                if let Some((_, _, href)) = hyperlinks
                     .iter()
-                    .find(|link| link.start() < utf16_end && link.end() > utf16_start)
+                    .find(|(start, end, _)| *start < utf16_end && *end > utf16_start)
                 {
-                    marks.push(json!({ "t": "link", "href": link.target() }));
+                    marks.push(json!({ "t": "link", "href": href }));
                 }
                 runs.push(json!({ "text": part, "marks": marks }));
             }
@@ -475,6 +475,40 @@ impl Converter {
             "align": align,
             "runs": runs
         }))
+    }
+
+    /// Visible link ranges in UTF-16 offsets, each with a destination ViveNotes can open.
+    ///
+    /// OneNote normally keeps the destination in a hidden marker before the linked text, which the
+    /// parser resolves. A URL OneNote linked as it was typed can instead be a hyperlink-formatted
+    /// run with no marker, its text being the destination.
+    fn text_links(&mut self, text: &RichText, parts: &[String]) -> Vec<(u32, u32, String)> {
+        let marked = text.hyperlinks();
+        let ranges = marked
+            .iter()
+            .map(|link| (link.start(), link.end()))
+            .collect::<Vec<_>>();
+        let runs = parts
+            .iter()
+            .enumerate()
+            .map(|(index, part)| {
+                let style = text
+                    .text_run_formatting()
+                    .get(index)
+                    .unwrap_or_else(|| text.paragraph_style());
+                (part.as_str(), style.hyperlink() && !style.hidden())
+            })
+            .collect::<Vec<_>>();
+        let mut links = unmarked_links(&runs, &ranges);
+        for link in marked {
+            match web_link(link.target()) {
+                Some(href) => links.push((link.start(), link.end(), href)),
+                None => self
+                    .warnings
+                    .push("omitted a link to a non-web destination, keeping its text".to_owned()),
+            }
+        }
+        links
     }
 
     fn convert_table(
@@ -827,6 +861,59 @@ fn style_marks(style: &ParagraphStyling, base: &ParagraphStyling) -> Vec<Value> 
     marks
 }
 
+/// Hyperlink-formatted `(text, linked)` runs outside every `marked` range, joined into contiguous
+/// ranges and kept where their text is itself a web address.
+fn unmarked_links(runs: &[(&str, bool)], marked: &[(u32, u32)]) -> Vec<(u32, u32, String)> {
+    let mut spans = Vec::new();
+    let mut open: Option<(u32, u32, String)> = None;
+    let mut start = 0u32;
+    for (text, linked) in runs {
+        let end = start + text.encode_utf16().count() as u32;
+        if *linked && !marked.iter().any(|(from, to)| *from < end && *to > start) {
+            let span = open.get_or_insert_with(|| (start, start, String::new()));
+            span.1 = end;
+            span.2.push_str(text);
+        } else {
+            spans.extend(open.take());
+        }
+        start = end;
+    }
+    spans.extend(open);
+    spans
+        .into_iter()
+        .filter_map(|(start, end, text)| Some((start, end, web_link(&text)?)))
+        .collect()
+}
+
+/// The destination as ViveNotes stores a link it can open: an http(s) address with a host and no
+/// user info, or a `www.` host given a scheme. Anything else, such as a `onenote:` page link, a
+/// `mailto:` address or a file path, would open as a broken web address in the app.
+fn web_link(target: &str) -> Option<String> {
+    let target = target.trim();
+    if target.is_empty() || target.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let url = if target.contains("://") {
+        target.to_owned()
+    } else if target
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("www."))
+    {
+        format!("https://{target}")
+    } else {
+        return None;
+    };
+    let (scheme, rest) = url.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once(':')
+        .map_or(authority, |(host, _)| host);
+    (!authority.contains('@') && !host.is_empty()).then_some(url)
+}
+
 fn block_plain_text(block: &Value) -> Option<String> {
     let runs = block.get("runs")?.as_array()?;
     Some(
@@ -1011,6 +1098,61 @@ mod tests {
     #[test]
     fn splits_by_utf16_offsets() {
         assert_eq!(split_utf16("a😀b", &[1, 3, 4]), ["a", "😀", "b"]);
+    }
+
+    #[test]
+    fn keeps_only_links_the_app_can_open() {
+        assert_eq!(
+            web_link(" https://www.youtube.com/watch?v=a&t=5s "),
+            Some("https://www.youtube.com/watch?v=a&t=5s".to_owned())
+        );
+        assert_eq!(
+            web_link("HTTP://example.com:8080/a"),
+            Some("HTTP://example.com:8080/a".to_owned())
+        );
+        assert_eq!(
+            web_link("www.example.com/a"),
+            Some("https://www.example.com/a".to_owned())
+        );
+        for target in [
+            "onenote:https://d.docs.live.net/nb/Section.one#Page&page-id={1}",
+            "onenote:#Page&section-id={1}",
+            "mailto:someone@example.com",
+            "file:///C:/notes/a.pdf",
+            "C:\\notes\\a.pdf",
+            "https://user@example.com/",
+            "https://",
+            "https://example.com/has space",
+            "Video",
+            "",
+        ] {
+            assert_eq!(web_link(target), None, "{target}");
+        }
+    }
+
+    #[test]
+    fn links_hyperlink_runs_whose_text_is_the_address() {
+        // A URL OneNote linked as it was typed: formatted as a link, but with no hidden marker.
+        assert_eq!(
+            unmarked_links(
+                &[
+                    ("https://youtu.be/", true),
+                    ("abc", true),
+                    (" after", false)
+                ],
+                &[]
+            ),
+            [(0, 20, "https://youtu.be/abc".to_owned())]
+        );
+        // Runs a marker already links, and linked labels that are not addresses, gain nothing.
+        assert!(unmarked_links(&[("Video", true)], &[(0, 5)]).is_empty());
+        assert!(unmarked_links(&[("https://example.com", true)], &[(0, 19)]).is_empty());
+        assert!(unmarked_links(&[("Video", true)], &[]).is_empty());
+        // Offsets are UTF-16, matching the parser's link ranges.
+        assert_eq!(
+            unmarked_links(&[("😀 ", false), ("www.example.com", true)], &[]),
+            [(3, 18, "https://www.example.com".to_owned())]
+        );
     }
 
     #[test]

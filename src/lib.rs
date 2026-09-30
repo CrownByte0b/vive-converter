@@ -17,7 +17,7 @@ pub use bundle::BundleSummary;
 pub use model::ConvertedNotebook;
 
 /// User-facing converter version shared by the CLI and browser module.
-pub const VERSION: &str = "1.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub enum Source {
     Notebook(Notebook),

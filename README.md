@@ -63,10 +63,11 @@ file references other files beside it, so the single-upload browser API rejects 
 notebook as `.onepkg` instead. Conversion is synchronous and can be CPU- and memory-intensive for
 large notebooks, so call it from a Web Worker in the website UI.
 
-The converter preserves sections, pages, positioned rich text, common inline equations, lists,
-tables, images, and ink. Section groups become a slash-separated section path because `.vive` v1
-has no group entity. Embedded files and unrecognized source objects are omitted with an explicit
-warning.
+The converter preserves sections, pages, positioned rich text, web links, common inline equations,
+lists, tables, images, and ink. Section groups become a slash-separated section path because `.vive`
+v1 has no group entity. Embedded files, unrecognized source objects, and links to non-web
+destinations (such as other OneNote pages or `mailto:` addresses, whose text is kept) are omitted
+with an explicit warning.
 
 Before publishing the output, the CLI validates SQLite integrity and foreign keys, page JSON,
 AndroidX Ink gzip payloads, ZIP entry names, and every archive checksum. ViveNotes performs the
