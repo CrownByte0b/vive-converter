@@ -56,6 +56,33 @@ async function convertUpload(file) {
 }
 ```
 
+## Android (ViveNotes)
+
+ViveNotes runs the converter in-process: File ▸ Import ▸ Notebook hands it any file that is not a
+`.vive`. The app's Gradle build compiles this crate with cargo-ndk, so it needs Rust, the
+`aarch64-linux-android` and `x86_64-linux-android` targets, `cargo-ndk`, and the NDK. To build the
+same library by hand:
+
+```sh
+make android-lib   # target/jniLibs/<abi>/libvive_converter.so
+```
+
+`src/android.rs` exports one JNI function,
+`com.vivenotes.data.onenote.OneNoteConverter.convert(input, fileName, seed, output)`. It converts the
+file at `input` and writes the `.vive` to `output`, which the app then validates and installs like
+any other. It returns JSON: the counts and warnings, or `{error, detail}`.
+
+Two things differ from the CLI and the browser:
+
+- **Identity.** The notebook's ids derive from the `seed` the app passes, a fresh one for each
+  import, so importing the same file twice gives two notebooks. The CLI and the browser derive ids
+  from the file name, so a second conversion of the same name updates the first copy when imported.
+- **Names.** `fileName` is the user's name for the file, and `input` can be called anything.
+
+Every entry point that takes a single file, the browser's included, recognises a package by its
+cabinet signature and reads anything else as a section. A `.onetoc2` is refused by its extension,
+or by the parser when the extension is missing.
+
 # Info
 
 The browser API accepts `.onepkg` notebook exports and individual `.one` sections. A `.onetoc2`

@@ -1,6 +1,6 @@
 [package]
 name = "vive-converter"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MPL-2.0"
@@ -26,6 +26,20 @@ clap = { version = "4", features = ["derive"] }
 onenote_parser = { path = "../onenote.rs/crates/parser", features = ["onepkg"] }
 rusqlite = { version = "0.40.2", features = ["bundled", "serialize"] }
 tempfile = "3"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+
+[dev-dependencies]
+# Builds a .onepkg fixture: the parser's samples have none small enough to commit.
+cab = "0.6"
+
+# The library the ViveNotes app loads (`make android-lib`).
+[profile.android]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 onenote_parser = { path = "../onenote.rs/crates/parser", default-features = false, features = ["onepkg"] }

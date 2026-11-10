@@ -1,8 +1,8 @@
-use crate::Source;
 use crate::ink::encode_stroke_input_batch;
 use crate::model::{
     Attachment, ConvertedNotebook, ConvertedPage, ConvertedSection, ConvertedStroke,
 };
+use crate::{Identity, InputError, Source};
 use anyhow::{Context, Result, bail};
 use image::GenericImageView;
 use onenote_parser::contents::{
@@ -17,21 +17,23 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
-use std::path::Path;
 use uuid::Uuid;
 
 const HALF_INCH_TO_DP: f32 = 80.0;
 const HIMETRIC_TO_DP: f32 = 160.0 / 2540.0;
 const DEFAULT_COLOR: i32 = 0xff6750a4u32 as i32;
 
-pub fn convert(source: &Source, input: &Path) -> Result<ConvertedNotebook> {
-    let name = input
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or("Imported OneNote notebook")
-        .to_owned();
-    let notebook_id = stable_id(&format!("onenote-notebook:{name}"));
+pub fn convert(source: &Source, name: &str, identity: Identity) -> Result<ConvertedNotebook> {
+    let name = if name.trim().is_empty() {
+        "Imported OneNote notebook"
+    } else {
+        name
+    }
+    .to_owned();
+    let notebook_id = match identity {
+        Identity::Named => stable_id(&format!("onenote-notebook:{name}")),
+        Identity::Seeded(seed) => stable_id(&format!("onenote-import:{seed}")),
+    };
     let mut converter = Converter {
         namespace: Uuid::parse_str(&notebook_id)?,
         attachments: BTreeMap::new(),
@@ -49,7 +51,7 @@ pub fn convert(source: &Source, input: &Path) -> Result<ConvertedNotebook> {
         }
     };
     if sections.is_empty() {
-        bail!("the OneNote source contains no readable sections")
+        bail!(InputError::NoSections)
     }
 
     let created_at = sections
