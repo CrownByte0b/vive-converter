@@ -1,4 +1,4 @@
-//! `com.vivenotes.data.onenote.OneNoteConverter.convert`, as the ViveNotes app declares it:
+//! `com.vivenotes.data.onenote.OneNoteConverter.convert` on Android, Linux and Windows:
 //!
 //! ```kotlin
 //! @JvmStatic external fun convert(input: String, fileName: String, seed: String, output: String): String
@@ -15,8 +15,8 @@ use serde_json::Value;
 use std::any::Any;
 use std::path::Path;
 
-/// The parser recurses through a page's outlines, and an ART worker thread has about 1 MB of
-/// stack. The conversion gets a thread of its own, with room to spare.
+/// The parser recurses through a page's outlines, and JVM/ART worker threads can have small
+/// stacks. The conversion gets a thread of its own, with room to spare on every platform.
 const STACK_BYTES: usize = 64 << 20;
 
 #[unsafe(no_mangle)]

@@ -1,7 +1,13 @@
 # ViveNotes OneNote converter
 
-This standalone CLI converts a OneNote package, notebook, or section into a portable ViveNotes
-`.vive` notebook. It uses the adjacent `onenote.rs`.
+The CLI and shared library convert a OneNote package, notebook, or section into a portable
+ViveNotes `.vive` notebook. They use the adjacent `onenote.rs` checkout. For the same parser
+revision as CI, set up the repositories as siblings:
+
+```sh
+git clone https://github.com/msiemens/onenote.rs.git ../onenote.rs
+git -C ../onenote.rs checkout fa4d7a044324af3bfe68727704a9789a08b36a3c
+```
 
 > Docs on .vive format [here](https://github.com/AquilaIgnis/viveNotes/blob/master/docs/viveFormat.md)
 
@@ -67,12 +73,12 @@ same library by hand:
 make android-lib   # target/jniLibs/<abi>/libvive_converter.so
 ```
 
-`src/android.rs` exports one JNI function,
+`src/native.rs` exports one JNI function,
 `com.vivenotes.data.onenote.OneNoteConverter.convert(input, fileName, seed, output)`. It converts the
 file at `input` and writes the `.vive` to `output`, which the app then validates and installs like
 any other. It returns JSON: the counts and warnings, or `{error, detail}`.
 
-Two things differ from the CLI and the browser:
+The app API differs from the CLI and the browser in two ways:
 
 - **Identity.** The notebook's ids derive from the `seed` the app passes, a fresh one for each
   import, so importing the same file twice gives two notebooks. The CLI and the browser derive ids
@@ -82,6 +88,102 @@ Two things differ from the CLI and the browser:
 Every entry point that takes a single file, the browser's included, recognises a package by its
 cabinet signature and reads anything else as a section. A `.onetoc2` is refused by its extension,
 or by the parser when the extension is missing.
+
+## Linux and Windows (JVM)
+
+The shared library exposes the same JNI method and JSON result on Android, Linux and Windows.
+The desktop builds support these 64-bit targets:
+
+| Platform | Rust target | Library |
+| --- | --- | --- |
+| Linux x86-64 | `x86_64-unknown-linux-gnu` | `libvive_converter.so` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` | `libvive_converter.so` |
+| Windows x86-64 | `x86_64-pc-windows-msvc` | `vive_converter.dll` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `vive_converter.dll` |
+
+Build on the destination platform with stable Rust and a C compiler (GCC on Linux or the Visual
+Studio C++ build tools on Windows). SQLite is compiled into the library; it needs no separate
+SQLite installation. From this directory:
+
+```sh
+make native-lib                         # target/native/<library> for this host
+# The equivalent command, also usable without make on Windows:
+cargo build --locked --profile native --lib
+
+# An explicit target writes to target/<target>/native/<library>:
+make native-lib NATIVE_TARGET=x86_64-unknown-linux-gnu
+```
+
+For an explicit target, install its Rust standard library with `rustup target add <target>`.
+Cross-compiling also requires that target's C compiler and linker; CI builds each desktop library
+on a native runner instead. The Linux release libraries are built on Ubuntu 22.04 and require
+glibc 2.35 or newer. Match the library's architecture to the **JVM's** architecture.
+
+On the Kotlin/JVM side, keep the package, class and static method names exactly as follows, and
+put the extracted library in a directory on `java.library.path`:
+
+```kotlin
+package com.vivenotes.data.onenote
+
+object OneNoteConverter {
+    init { System.loadLibrary("vive_converter") }
+
+    @JvmStatic
+    external fun convert(input: String, fileName: String, seed: String, output: String): String
+}
+```
+
+The JVM smoke test loads the compiled library and checks conversion, Unicode strings/paths and
+error results. With a JDK installed, run it locally after `make native-lib`:
+
+```sh
+javac -d target/jni-smoke tests/jni/com/vivenotes/data/onenote/OneNoteConverter.java
+java -cp target/jni-smoke com.vivenotes.data.onenote.OneNoteConverter \
+  target/native/libvive_converter.so \
+  "../onenote.rs/crates/parser/tests/samples/joplin/Simple notebook/Quick Notes.one"
+```
+
+Use `target/native/vive_converter.dll` on Windows. For an explicit Rust target, include its name
+in the library path, for example `target/x86_64-unknown-linux-gnu/native/libvive_converter.so`.
+
+## Manual draft releases
+
+The [Native libraries workflow](.github/workflows/native-libraries.yml) runs only when manually
+dispatched. Once the workflow is on the repository's default branch:
+
+1. Open **Actions → Native libraries (draft release) → Run workflow**.
+2. Select the branch or tag to build. The workflow uses that exact commit for every library.
+3. Leave `tag` empty for `v<Cargo.toml version>` (currently `v1.1.0`), or enter a release tag.
+   If that tag already exists, it must point to the commit selected in step 2.
+4. After all builds and tests pass, open **Releases** to review the draft and publish it when ready.
+
+The same operation through the GitHub CLI is:
+
+```sh
+gh workflow run native-libraries.yml --ref master -f tag=v1.1.0
+```
+
+The workflow attaches six ZIP files, named `vive-converter-<version>-<rust-target>.zip`, and a
+`SHA256SUMS` file. Each ZIP contains the shared library, this README, the license and
+`BUILD-INFO.json` with the target, source revisions and compiler version. Android assets use
+`aarch64-linux-android` (arm64-v8a) and `x86_64-linux-android`; they use Android API 35 and NDK
+28.2.13676358, matching the manual Android build.
+
+Desktop jobs run the Rust tests and the JVM smoke test on each target's native architecture.
+Android libraries are cross-compiled with cargo-ndk; the workflow does not run them on a device.
+The separate `onenote_parser` cdylib is excluded from every archive because the converter links
+the parser statically.
+
+Re-running a tag replaces these assets in its existing **draft**. A published release is refused.
+Only the final job has `contents: write`; it uses the built-in `GITHUB_TOKEN`, so no extra release
+secret is needed. Builds also remain available as workflow artifacts. After downloading the six
+ZIP files and `SHA256SUMS` into one directory, verify them on Linux with `sha256sum -c SHA256SUMS`.
+
+References: [manual workflow dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
+[native GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+[draft release creation](https://cli.github.com/manual/gh_release_create),
+[Rust targets](https://doc.rust-lang.org/rustc/platform-support.html), and
+[cargo-ndk](https://github.com/bbqsrc/cargo-ndk).
 
 # Info
 

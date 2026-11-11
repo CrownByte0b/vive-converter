@@ -27,19 +27,23 @@ onenote_parser = { path = "../onenote.rs/crates/parser", features = ["onepkg"] }
 rusqlite = { version = "0.40.2", features = ["bundled", "serialize"] }
 tempfile = "3"
 
-[target.'cfg(target_os = "android")'.dependencies]
+[target.'cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))'.dependencies]
 jni = "0.22"
 
 [dev-dependencies]
 # Builds a .onepkg fixture: the parser's samples have none small enough to commit.
 cab = "0.6"
 
-# The library the ViveNotes app loads (`make android-lib`).
-[profile.android]
+# The JNI library ViveNotes loads on Android and desktop.
+[profile.native]
 inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
+
+# Keep the profile used by the Android app's Gradle build.
+[profile.android]
+inherits = "native"
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 onenote_parser = { path = "../onenote.rs/crates/parser", default-features = false, features = ["onepkg"] }

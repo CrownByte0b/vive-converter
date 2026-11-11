@@ -1,0 +1,234 @@
+name: Native libraries (draft release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (leave empty to use v<Cargo.toml version>)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-libraries-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Match the adjacent checkout used for local builds; do not follow upstream HEAD.
+  ONENOTE_PARSER_REV: fa4d7a044324af3bfe68727704a9789a08b36a3c
+
+defaults:
+  run:
+    shell: bash
+    working-directory: vive-converter
+
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: vive-converter
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Resolve version and validate the release tag
+        id: release
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          tag="${REQUESTED_TAG:-v$version}"
+          if [[ "$tag" == -* ]]; then
+            echo "Release tags must not start with a dash." >&2
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$tag"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            tagged_commit=$(git rev-parse "refs/tags/$tag^{commit}")
+            if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+              echo "Tag $tag points to $tagged_commit, but this run builds $GITHUB_SHA. Select that tag as the workflow ref or use a new release tag." >&2
+              exit 1
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    name: ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            library: libvive_converter.so
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+            library: libvive_converter.so
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+            library: vive_converter.dll
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            library: vive_converter.dll
+    env:
+      TARGET: ${{ matrix.target }}
+      LIBRARY: ${{ matrix.library }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: vive-converter
+          persist-credentials: false
+      - name: Check out the pinned parser beside the converter
+        uses: actions/checkout@v7
+        with:
+          repository: msiemens/onenote.rs
+          ref: ${{ env.ONENOTE_PARSER_REV }}
+          path: onenote.rs
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: microsoft
+          java-version: '21'
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "$TARGET"
+      - name: Run Rust tests
+        run: cargo test --locked --target "$TARGET"
+      - name: Build the shared library
+        run: cargo build --locked --profile native --lib --target "$TARGET"
+      - name: Load the library and convert a sample through JNI
+        run: |
+          javac -d target/jni-smoke tests/jni/com/vivenotes/data/onenote/OneNoteConverter.java
+          java -cp target/jni-smoke com.vivenotes.data.onenote.OneNoteConverter \
+            "target/$TARGET/native/$LIBRARY" \
+            "../onenote.rs/crates/parser/tests/samples/joplin/Simple notebook/Quick Notes.one"
+      - name: Package the library
+        run: python3 scripts/package-library.py "$TARGET" "target/$TARGET/native/$LIBRARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.target }}
+          path: vive-converter/dist/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  android:
+    name: Android (arm64-v8a and x86_64)
+    needs: prepare
+    runs-on: ubuntu-22.04
+    env:
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: vive-converter
+          persist-credentials: false
+      - name: Check out the pinned parser beside the converter
+        uses: actions/checkout@v7
+        with:
+          repository: msiemens/onenote.rs
+          ref: ${{ env.ONENOTE_PARSER_REV }}
+          path: onenote.rs
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install Rust and cargo-ndk
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Install the Android NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Build the Android shared libraries
+        run: make android-lib
+      - name: Package the Android libraries
+        run: |
+          python3 scripts/package-library.py aarch64-linux-android target/jniLibs/arm64-v8a/libvive_converter.so
+          python3 scripts/package-library.py x86_64-linux-android target/jniLibs/x86_64/libvive_converter.so
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-android
+          path: vive-converter/dist/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  draft-release:
+    name: Attach all libraries to a draft release
+    needs: [prepare, desktop, android]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: vive-converter
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: vive-converter/dist
+          merge-multiple: true
+      - name: Verify every archive and generate checksums
+        run: |
+          for target in \
+            x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-msvc aarch64-pc-windows-msvc \
+            aarch64-linux-android x86_64-linux-android; do
+            archive="dist/vive-converter-$VERSION-$target.zip"
+            test -s "$archive"
+            unzip -t "$archive"
+          done
+          (cd dist && sha256sum ./*.zip > SHA256SUMS)
+      - name: Create or update the draft release
+        run: |
+          # Recheck in case a tag was created while the builds were running.
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+          fi
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            if [[ "$is_draft" != true ]]; then
+              echo "Release $RELEASE_TAG is already published. Use a new tag to create a draft." >&2
+              exit 1
+            fi
+            gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA"
+          else
+            cat > "$RUNNER_TEMP/native-release-notes.md" <<EOF
+          JNI shared libraries for ViveNotes $VERSION.
+
+          Platforms: Linux x86-64/ARM64, Windows x86-64/ARM64, Android x86-64/ARM64.
+          Converter commit: $GITHUB_SHA
+          OneNote parser commit: $ONENOTE_PARSER_REV
+
+          Each ZIP contains the library, README, license and build metadata. Verify downloads with SHA256SUMS.
+          EOF
+            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" \
+              --title "Vive converter $VERSION" --notes-file "$RUNNER_TEMP/native-release-notes.md"
+          fi
+          gh release upload "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS --clobber
+          echo "Draft release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases" >> "$GITHUB_STEP_SUMMARY"

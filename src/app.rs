@@ -1,6 +1,6 @@
 //! What the ViveNotes app gets back from a conversion.
 //!
-//! The JNI glue in `android.rs` only moves strings across. Everything it calls is here so it can
+//! The JNI glue in `native.rs` only moves strings across. Everything it calls is here so it can
 //! be tested on the host.
 
 use crate::{Identity, InputError, convert_file};

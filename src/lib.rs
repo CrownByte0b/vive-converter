@@ -3,10 +3,15 @@ mod convert;
 mod ink;
 mod model;
 
-#[cfg(target_os = "android")]
-mod android;
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    test
+))]
 mod app;
+#[cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))]
+mod native;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;
 
