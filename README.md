@@ -94,12 +94,12 @@ or by the parser when the extension is missing.
 The shared library exposes the same JNI method and JSON result on Android, Linux and Windows.
 The desktop builds support these 64-bit targets:
 
-| Platform | Rust target | Library |
-| --- | --- | --- |
-| Linux x86-64 | `x86_64-unknown-linux-gnu` | `libvive_converter.so` |
-| Linux ARM64 | `aarch64-unknown-linux-gnu` | `libvive_converter.so` |
-| Windows x86-64 | `x86_64-pc-windows-msvc` | `vive_converter.dll` |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | `vive_converter.dll` |
+| Platform       | Rust target                 | Library                |
+| -------------- | --------------------------- | ---------------------- |
+| Linux x86-64   | `x86_64-unknown-linux-gnu`  | `libvive_converter.so` |
+| Linux ARM64    | `aarch64-unknown-linux-gnu` | `libvive_converter.so` |
+| Windows x86-64 | `x86_64-pc-windows-msvc`    | `vive_converter.dll`   |
+| Windows ARM64  | `aarch64-pc-windows-msvc`   | `vive_converter.dll`   |
 
 Build on the destination platform with stable Rust and a C compiler (GCC on Linux or the Visual
 Studio C++ build tools on Windows). SQLite is compiled into the library; it needs no separate
@@ -145,45 +145,6 @@ java -cp target/jni-smoke com.vivenotes.data.onenote.OneNoteConverter \
 
 Use `target/native/vive_converter.dll` on Windows. For an explicit Rust target, include its name
 in the library path, for example `target/x86_64-unknown-linux-gnu/native/libvive_converter.so`.
-
-## Manual draft releases
-
-The [Native libraries workflow](.github/workflows/native-libraries.yml) runs only when manually
-dispatched. Once the workflow is on the repository's default branch:
-
-1. Open **Actions → Native libraries (draft release) → Run workflow**.
-2. Select the branch or tag to build. The workflow uses that exact commit for every library.
-3. Leave `tag` empty for `v<Cargo.toml version>` (currently `v1.1.0`), or enter a release tag.
-   If that tag already exists, it must point to the commit selected in step 2.
-4. After all builds and tests pass, open **Releases** to review the draft and publish it when ready.
-
-The same operation through the GitHub CLI is:
-
-```sh
-gh workflow run native-libraries.yml --ref master -f tag=v1.1.0
-```
-
-The workflow attaches six ZIP files, named `vive-converter-<version>-<rust-target>.zip`, and a
-`SHA256SUMS` file. Each ZIP contains the shared library, this README, the license and
-`BUILD-INFO.json` with the target, source revisions and compiler version. Android assets use
-`aarch64-linux-android` (arm64-v8a) and `x86_64-linux-android`; they use Android API 35 and NDK
-28.2.13676358, matching the manual Android build.
-
-Desktop jobs run the Rust tests and the JVM smoke test on each target's native architecture.
-Android libraries are cross-compiled with cargo-ndk; the workflow does not run them on a device.
-The separate `onenote_parser` cdylib is excluded from every archive because the converter links
-the parser statically.
-
-Re-running a tag replaces these assets in its existing **draft**. A published release is refused.
-Only the final job has `contents: write`; it uses the built-in `GITHUB_TOKEN`, so no extra release
-secret is needed. Builds also remain available as workflow artifacts. After downloading the six
-ZIP files and `SHA256SUMS` into one directory, verify them on Linux with `sha256sum -c SHA256SUMS`.
-
-References: [manual workflow dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
-[native GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
-[draft release creation](https://cli.github.com/manual/gh_release_create),
-[Rust targets](https://doc.rust-lang.org/rustc/platform-support.html), and
-[cargo-ndk](https://github.com/bbqsrc/cargo-ndk).
 
 # Info
 
