@@ -295,7 +295,7 @@ pub(crate) mod tests {
 
     pub(crate) const SAMPLES: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../onenote.rs/crates/parser/tests/samples"
+        "/tests/samples"
     );
 
     pub(crate) fn sample(name: &str) -> Vec<u8> {
@@ -342,7 +342,7 @@ pub(crate) mod tests {
     #[test]
     fn converts_an_uploaded_section_entirely_in_memory() {
         let input = include_bytes!(
-            "../../onenote.rs/crates/parser/tests/samples/joplin/Simple notebook/Quick Notes.one"
+            "../tests/samples/joplin/Simple notebook/Quick Notes.one"
         );
         let output = convert_bytes(input, "Quick Notes.one").unwrap();
 

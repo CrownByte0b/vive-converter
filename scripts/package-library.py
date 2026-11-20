@@ -39,11 +39,17 @@ def main():
 
     with (ROOT / "Cargo.toml").open("rb") as manifest:
         version = tomllib.load(manifest)["package"]["version"]
+    with (ROOT / "Cargo.lock").open("rb") as lock:
+        parser_version = next(
+            package["version"]
+            for package in tomllib.load(lock)["package"]
+            if package["name"] == "onenote_parser"
+        )
     metadata = {
         "version": version,
         "target": args.target,
         "converter_revision": git_revision(ROOT),
-        "parser_revision": git_revision(ROOT.parent / "onenote.rs"),
+        "parser_version": parser_version,
         "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(),
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)

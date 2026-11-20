@@ -1,13 +1,7 @@
 # ViveNotes OneNote converter
 
 The CLI and shared library convert a OneNote package, notebook, or section into a portable
-ViveNotes `.vive` notebook. They use the adjacent `onenote.rs` checkout. For the same parser
-revision as CI, set up the repositories as siblings:
-
-```sh
-git clone https://github.com/msiemens/onenote.rs.git ../onenote.rs
-git -C ../onenote.rs checkout fa4d7a044324af3bfe68727704a9789a08b36a3c
-```
+ViveNotes `.vive` notebook. They use the `onenote_parser` crate from crates.io.
 
 > Docs on .vive format [here](https://github.com/AquilaIgnis/viveNotes/blob/master/docs/viveFormat.md)
 
@@ -101,16 +95,10 @@ The desktop builds support these 64-bit targets:
 | Windows x86-64 | `x86_64-pc-windows-msvc`    | `vive_converter.dll`   |
 | Windows ARM64  | `aarch64-pc-windows-msvc`   | `vive_converter.dll`   |
 
-Build on the destination platform with stable Rust and a C compiler (GCC on Linux or the Visual
-Studio C++ build tools on Windows). SQLite is compiled into the library; it needs no separate
-SQLite installation. From this directory:
-
 ```sh
-make native-lib                         # target/native/<library> for this host
-# The equivalent command, also usable without make on Windows:
+make native-lib
 cargo build --locked --profile native --lib
 
-# An explicit target writes to target/<target>/native/<library>:
 make native-lib NATIVE_TARGET=x86_64-unknown-linux-gnu
 ```
 
@@ -140,7 +128,7 @@ error results. With a JDK installed, run it locally after `make native-lib`:
 javac -d target/jni-smoke tests/jni/com/vivenotes/data/onenote/OneNoteConverter.java
 java -cp target/jni-smoke com.vivenotes.data.onenote.OneNoteConverter \
   target/native/libvive_converter.so \
-  "../onenote.rs/crates/parser/tests/samples/joplin/Simple notebook/Quick Notes.one"
+  "tests/samples/joplin/Simple notebook/Quick Notes.one"
 ```
 
 Use `target/native/vive_converter.dll` on Windows. For an explicit Rust target, include its name

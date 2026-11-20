@@ -17,8 +17,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Match the adjacent checkout used for local builds; do not follow upstream HEAD.
-  ONENOTE_PARSER_REV: fa4d7a044324af3bfe68727704a9789a08b36a3c
 
 defaults:
   run:
@@ -90,13 +88,6 @@ jobs:
         with:
           path: vive-converter
           persist-credentials: false
-      - name: Check out the pinned parser beside the converter
-        uses: actions/checkout@v7
-        with:
-          repository: msiemens/onenote.rs
-          ref: ${{ env.ONENOTE_PARSER_REV }}
-          path: onenote.rs
-          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -118,7 +109,7 @@ jobs:
           javac -d target/jni-smoke tests/jni/com/vivenotes/data/onenote/OneNoteConverter.java
           java -cp target/jni-smoke com.vivenotes.data.onenote.OneNoteConverter \
             "target/$TARGET/native/$LIBRARY" \
-            "../onenote.rs/crates/parser/tests/samples/joplin/Simple notebook/Quick Notes.one"
+            "tests/samples/joplin/Simple notebook/Quick Notes.one"
       - name: Package the library
         run: python3 scripts/package-library.py "$TARGET" "target/$TARGET/native/$LIBRARY"
       - uses: actions/upload-artifact@v7
@@ -138,13 +129,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: vive-converter
-          persist-credentials: false
-      - name: Check out the pinned parser beside the converter
-        uses: actions/checkout@v7
-        with:
-          repository: msiemens/onenote.rs
-          ref: ${{ env.ONENOTE_PARSER_REV }}
-          path: onenote.rs
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
@@ -218,12 +202,13 @@ jobs:
             fi
             gh release edit "$RELEASE_TAG" --target "$GITHUB_SHA"
           else
+            parser_version=$(awk '/^name = "onenote_parser"$/ { getline; gsub(/version = |"/, ""); print; exit }' Cargo.lock)
             cat > "$RUNNER_TEMP/native-release-notes.md" <<EOF
           JNI shared libraries for ViveNotes $VERSION.
 
           Platforms: Linux x86-64/ARM64, Windows x86-64/ARM64, Android x86-64/ARM64.
           Converter commit: $GITHUB_SHA
-          OneNote parser commit: $ONENOTE_PARSER_REV
+          OneNote parser: onenote_parser $parser_version
 
           Each ZIP contains the library, README, license and build metadata. Verify downloads with SHA256SUMS.
           EOF
