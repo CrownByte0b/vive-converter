@@ -16,7 +16,7 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-typed-path = "0.12"
+typed-path = "0.13"
 uuid = { version = "1", features = ["js", "v5", "v7"] }
 zip = { version = "6", default-features = false, features = ["deflate"] }
 time = "0.3"
